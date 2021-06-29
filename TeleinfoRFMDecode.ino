@@ -112,7 +112,7 @@ void traitement_trame(char *buff)
     }
     if (strncmp("EAIT", &buff[0] , 4)==0) {
       teleinfo.EAIT = atol(&buff[5]);
-	  mode_producteur = true;
+	    mode_producteur = true;
       return;
     }
     if (strncmp("IRMS", &buff[0] , 4)==0) {

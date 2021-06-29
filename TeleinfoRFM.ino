@@ -24,20 +24,24 @@
 //   _| |  |   ` \    -_)   -_)    _ \  |   -_)  |  |   -_)
 //  _| \_,_| _|_|_| \___| \___|   ___/ _| \___| \_,_| \___|
 //--------------------------------------------------------------------
+// Trame : $origine;destinataire;donnees cryptées
 //--------------------------------------------------------------------
 // 2021/01/15 - FB V1.0.0
+// 2021/06/11 - FB V1.0.1
 //--------------------------------------------------------------------
 #include <Arduino.h>
 #include <SPI.h>
 #include <LoRa.h>
 #include <jled.h>
 #define MAX_XXTEA_DATA8 200
-#include <xxtea-iot-crypt.h>
+#include <xxtea-lib.h>
 
-#define VERSION   "v1.0.0"
+#define VERSION   "v1.0.1"
 
-#define GATEWAY_ADDRESS 1
-#define CLIENT_LINKY_ADDRESS 2
+#define GATEWAY_ADDRESS       1
+#define CLIENT_LINKY_ADDRESS  2
+
+#define ENTETE  '$'
 
 #define MY_BAUD_RATE 9600    // mode standard
 
@@ -45,7 +49,6 @@
 #define TELEINFO_LED_PIN  3   // Teleinfo LED
 #define TRANS_LED_PIN     5   // Trans LED
 
-#define ENTETE '$'
 #define CRYPT_PASS "FumeeBleue"
 
 //-------------------------------------------------------------------------------------
@@ -54,47 +57,49 @@
 //-------------------------------------------------------------------------------------
 #define SEUIL_CHARGE   820
 
-#define RFM_TX_POWER 20   // 5..23 dBm, 13 dBm is default
+#define RFM_TX_POWER   8 //20   // 5..23 dBm, 13 dBm is default
 
 #define NB_SEND_INFO   5
 
 
-#define CHILD_ID_ADSC     0
-#define CHILD_ID_VTIC     1
-#define CHILD_ID_NGTF     2
-#define CHILD_ID_LTARF    3
-#define CHILD_ID_EAST     4
-#define CHILD_ID_IRMS1    5
-#define CHILD_ID_IRMS2    6
-#define CHILD_ID_IRMS3    7
-#define CHILD_ID_URMS1    8
-#define CHILD_ID_URMS2    9
-#define CHILD_ID_URMS3    10
-#define CHILD_ID_PREF     11
-#define CHILD_ID_PCOUP    12
-#define CHILD_ID_SINSTS   13
-#define CHILD_ID_SINSTS1  14
-#define CHILD_ID_SINSTS2  15
-#define CHILD_ID_SINSTS3  16
-#define CHILD_ID_STGE     17
-#define CHILD_ID_MSG1     18
-#define CHILD_ID_NTARF    19
-#define CHILD_ID_NJOURF   20
-#define CHILD_ID_NJOURF1  21
-#define CHILD_ID_EAIT     22
-#define CHILD_ID_SINSTI   23
-#define CHILD_ID_EASF01   24
-#define CHILD_ID_EASF02   25
-#define CHILD_ID_EASF03   26
-#define CHILD_ID_EASD01   34
-#define CHILD_ID_EASD02   35
-#define CHILD_ID_EASD03   36
-#define CHILD_ID_ERQ1     38
-#define CHILD_ID_ERQ2     39
-#define CHILD_ID_ERQ3     40
-#define CHILD_ID_SINSTSmin   60
-#define CHILD_ID_SINSTSmax   61
-#define CHILD_ID_LINKY    99
+#define ETIQU_ADSC     1
+#define ETIQU_VTIC     2
+#define ETIQU_NGTF     3
+#define ETIQU_LTARF    4
+#define ETIQU_EAST     5
+#define ETIQU_IRMS1    6
+#define ETIQU_IRMS2    7
+#define ETIQU_IRMS3    8
+#define ETIQU_URMS1    9
+#define ETIQU_URMS2    10
+#define ETIQU_URMS3    11
+#define ETIQU_PREF     12
+#define ETIQU_PCOUP    13
+#define ETIQU_SINSTS   14
+#define ETIQU_SINSTS1  15
+#define ETIQU_SINSTS2  16
+#define ETIQU_SINSTS3  17
+#define ETIQU_STGE     18
+#define ETIQU_MSG1     19
+#define ETIQU_NTARF    20
+#define ETIQU_NJOURF   21
+#define ETIQU_NJOURF1  22
+#define ETIQU_EAIT     23
+#define ETIQU_SINSTI   24
+#define ETIQU_EASF01   25
+#define ETIQU_EASF02   26
+#define ETIQU_EASF03   27
+#define ETIQU_EASD01   28
+#define ETIQU_EASD02   29
+#define ETIQU_EASD03   30
+#define ETIQU_ERQ1     31
+#define ETIQU_ERQ2     32
+#define ETIQU_ERQ3     33
+
+#define ETIQU_SINSTSmin   50
+#define ETIQU_SINSTSmax   51
+#define ETIQU_STEP        90
+#define ETIQU_BOOT        91
 
 
 // Variables Téléinfo---------------------
@@ -135,9 +140,8 @@ struct teleinfo_s {
   unsigned long ERQ2=0; // Energie reactive Q2 totale
   unsigned long ERQ3=0; // Energie reactive Q3 totale
   unsigned long ERQ4=0; // Energie reactive Q4 totale
-}; 
+} teleinfo; 
 
-struct teleinfo_s teleinfo;
 
 unsigned int cpt_send_info = NB_SEND_INFO;
 unsigned int step_envoi = 0;
@@ -151,7 +155,7 @@ boolean mode_triphase = false;
 
 auto led_chg = JLed(TRANS_LED_PIN);
 
-//-------------------------------------------------------------------- CHANGE
+//------------------------------------------------------------------- CHANGE
 void change_etat_led_teleinfo()
 {
   static int led_state;
@@ -180,7 +184,7 @@ String trame;
   if (valeur.length() > 0) {
     digitalWrite(TRANS_LED_PIN, HIGH);
 
-    trame = String(ENTETE) + String(CLIENT_LINKY_ADDRESS) + ";" +  String(GATEWAY_ADDRESS) + ";" + xxtea.encrypt(etiquette + ";" + valeur + ";");
+    trame =  String(ENTETE) + String(CLIENT_LINKY_ADDRESS) + ';' + String(GATEWAY_ADDRESS) + ';' + xxtea.encrypt(etiquette + ";" + valeur + ";");
     
     Serial.print(F("Send char: "));
     Serial.print(trame.length());
@@ -203,11 +207,12 @@ String trame, data;
     // deux vagues pour ne pas dépasser les 200 caractères max pour LORA
     case 0 : // info première vague
       if (test_charge_condo() == true) {
-        trame = String(ENTETE) + String(CLIENT_LINKY_ADDRESS) + ";" + String(GATEWAY_ADDRESS) + ";";
-        data = String(CHILD_ID_ADSC) + ";" + teleinfo._ADSC + ";";
-        data += String(CHILD_ID_NGTF) + ";" + teleinfo.NGTF + ";";
-        data += String(CHILD_ID_LINKY) + ";1;";
+        trame =  String(ENTETE) + String(CLIENT_LINKY_ADDRESS) + ';' + String(GATEWAY_ADDRESS) + ';';
+        data = String(ETIQU_ADSC) + ';' + teleinfo._ADSC + ";";
+        data += String(ETIQU_NGTF) + ';' + teleinfo.NGTF + ";";
+        data += String(ETIQU_STEP) + ";I1;";
         trame += xxtea.encrypt(data);
+        
         Serial.print(F(">> Send info 1 vague "));
         Serial.print(trame.length());
         Serial.print(F(": "));
@@ -223,11 +228,12 @@ String trame, data;
       
     case 1 : // info deuxième vague
       if (test_charge_condo() == true) {
-        trame = String(ENTETE) + String(CLIENT_LINKY_ADDRESS) + ";" + String(GATEWAY_ADDRESS) + ";";
-        data += String(CHILD_ID_NJOURF) + ";" + teleinfo.NJOURF + ";";
-        data += String(CHILD_ID_NJOURF1) + ";" + teleinfo.NJOURF1 + ";";
-        data += String(CHILD_ID_LINKY) + ";2;";
+        trame =  String(ENTETE) + String(CLIENT_LINKY_ADDRESS) + ';' + String(GATEWAY_ADDRESS) + ';';
+        data += String(ETIQU_NJOURF) + ';' + teleinfo.NJOURF + ";";
+        data += String(ETIQU_NJOURF1) + ';' + teleinfo.NJOURF1 + ";";
+        data += String(ETIQU_STEP) + ";I2;";
         trame += xxtea.encrypt(data);
+        
         Serial.print(F(">> Send info 2 vague "));
         Serial.print(trame.length());
         Serial.print(F(": "));
@@ -258,14 +264,15 @@ String trame, data;
     // deux vagues pour ne pas dépasser les 200 caractères max pour LORA
     case 0 : // mono première vague
       if (test_charge_condo() == true) {
-        trame = String(ENTETE) + String(CLIENT_LINKY_ADDRESS) + ";" + String(GATEWAY_ADDRESS) + ";";
-        data = String(CHILD_ID_SINSTS) + ";" + teleinfo.SINSTS + ";";
-        data += String(CHILD_ID_SINSTSmin) + ";" + teleinfo.SINSTSmin + ";";
-        data += String(CHILD_ID_SINSTSmax) + ";" + teleinfo.SINSTSmax + ";";
-        data += String(CHILD_ID_LINKY) + ";3;";
+        trame =  String(ENTETE) + String(CLIENT_LINKY_ADDRESS) + ';' + String(GATEWAY_ADDRESS) + ';';
+        data = String(ETIQU_SINSTS) + ';' + teleinfo.SINSTS + ";";
+        data += String(ETIQU_SINSTSmin) + ';' + teleinfo.SINSTSmin + ";";
+        data += String(ETIQU_SINSTSmax) + ';' + teleinfo.SINSTSmax + ";";
+        data += String(ETIQU_STEP) + ";M1;";
         teleinfo.SINSTSmin = teleinfo.SINSTS;
         teleinfo.SINSTSmax = teleinfo.SINSTS;
         trame += xxtea.encrypt(data);
+        
         Serial.print(F(">> Send mono 1 vague "));
         Serial.print(trame.length());
         Serial.print(F(": "));
@@ -281,14 +288,15 @@ String trame, data;
 
     case 1 : // mono deuxième vague
       if (test_charge_condo() == true) {
-        trame = String(ENTETE) + String(CLIENT_LINKY_ADDRESS) + ";" + String(GATEWAY_ADDRESS) + ";";
-        data += String(CHILD_ID_EAST) + ";" + teleinfo.EAST + ";";
-        data += String(CHILD_ID_LTARF) + ";" + teleinfo.LTARF + ";";
-        data += String(CHILD_ID_NTARF) + ";" + teleinfo.NTARF + ";";
-        data += String(CHILD_ID_LINKY) + ";4;";
+        trame =  String(ENTETE) + String(CLIENT_LINKY_ADDRESS) + ';' + String(GATEWAY_ADDRESS) + ';';
+        data += String(ETIQU_EAST) + ';' + teleinfo.EAST + ";";
+        data += String(ETIQU_LTARF) + ';' + teleinfo.LTARF + ";";
+        data += String(ETIQU_NTARF) + ';' + teleinfo.NTARF + ";";
+        data += String(ETIQU_STEP) + ";M2;";
         teleinfo.SINSTSmin = teleinfo.SINSTS;
         teleinfo.SINSTSmax = teleinfo.SINSTS;
         trame += xxtea.encrypt(data);
+        
         Serial.print(F(">> Send mono 2 vague "));
         Serial.print(trame.length());
         Serial.print(F(": "));
@@ -304,12 +312,13 @@ String trame, data;
 
     case 2 : // mono troisième vague
       if (test_charge_condo() == true) {
-        trame = String(ENTETE) + String(CLIENT_LINKY_ADDRESS) + ";" + String(GATEWAY_ADDRESS) + ";";
-        data = String(CHILD_ID_EASF01) + ";" + teleinfo.EASF01 + ";";
-        data += String(CHILD_ID_EASF02) + ";" + teleinfo.EASF02 + ";";
-        data += String(CHILD_ID_EASF03) + ";" + teleinfo.EASF03 + ";";
-        data += String(CHILD_ID_LINKY) + ";5;";
+        trame =  String(ENTETE) + String(CLIENT_LINKY_ADDRESS) + ';' + String(GATEWAY_ADDRESS) + ';';
+        data = String(ETIQU_EASF01) + ';' + teleinfo.EASF01 + ";";
+        data += String(ETIQU_EASF02) + ';' + teleinfo.EASF02 + ";";
+        data += String(ETIQU_EASF03) + ';' + teleinfo.EASF03 + ";";
+        data += String(ETIQU_STEP) + ";M3;";
         trame += xxtea.encrypt(data);
+        
         Serial.print(F(">> Send mono 3 vague "));
         Serial.print(trame.length());
         Serial.print(F(": "));
@@ -339,13 +348,14 @@ String trame, data;
   // deux vagues pour ne pas dépasser les 200 caractères max pour LORA
     case 0 : // prod première vague
       if (test_charge_condo() == true) {
-        trame = String(ENTETE) + String(CLIENT_LINKY_ADDRESS) + ";" + String(GATEWAY_ADDRESS) + ";";
-        data = String(CHILD_ID_EAIT) + ";" + teleinfo.EAIT + ";";
-        data += String(CHILD_ID_ERQ1) + ";" + teleinfo.ERQ1 + ";";
-        data += String(CHILD_ID_LINKY) + ";6;";
+        trame =  String(ENTETE) + String(CLIENT_LINKY_ADDRESS) + ';' + String(GATEWAY_ADDRESS) + ';';
+        data = String(ETIQU_EAIT) + ';' + teleinfo.EAIT + ";";
+        data += String(ETIQU_ERQ1) + ';' + teleinfo.ERQ1 + ";";
+        data += String(ETIQU_STEP) + ";P1;";
         teleinfo.SINSTSmin = teleinfo.SINSTS;
         teleinfo.SINSTSmax = teleinfo.SINSTS;
         trame += xxtea.encrypt(data);
+        
         Serial.print(F(">> Send prod 1 vague "));
         Serial.print(trame.length());
         Serial.print(F(": "));
@@ -361,12 +371,13 @@ String trame, data;
 
     case 2 : // prod deuxime vague
       if (test_charge_condo() == true) {
-        trame = String(ENTETE) + String(CLIENT_LINKY_ADDRESS) + ";" + String(GATEWAY_ADDRESS) + ";";
-        data += String(CHILD_ID_ERQ2) + ";" + teleinfo.ERQ2 + ";";
-        data += String(CHILD_ID_ERQ3) + ";" + teleinfo.ERQ3 + ";";
-        data += String(CHILD_ID_SINSTI) + ";" + teleinfo.SINSTI + ";";
-        data += String(CHILD_ID_LINKY) + ";7;";
+        trame =  String(ENTETE) + String(CLIENT_LINKY_ADDRESS) + ';' + String(GATEWAY_ADDRESS) + ';';
+        data += String(ETIQU_ERQ2) + ';' + teleinfo.ERQ2 + ";";
+        data += String(ETIQU_ERQ3) + ';' + teleinfo.ERQ3 + ";";
+        data += String(ETIQU_SINSTI) + ';' + teleinfo.SINSTI + ";";
+        data += String(ETIQU_STEP) + ";P2;";
         trame += xxtea.encrypt(data);
+        
         Serial.print(F(">> Send prod 2 vague "));
         Serial.print(trame.length());
         Serial.print(F(": "));
@@ -394,12 +405,13 @@ String trame, data;
   digitalWrite(TRANS_LED_PIN, HIGH);
   if (test_charge_condo() == true) {
     
-    trame = String(ENTETE) + String(CLIENT_LINKY_ADDRESS) + ";" + String(GATEWAY_ADDRESS) + ";";
-    data += String(CHILD_ID_SINSTS1) + ";" + teleinfo.SINSTS1 + ";";
-    data += String(CHILD_ID_SINSTS2) + ";" + teleinfo.SINSTS2 + ";";
-    data += String(CHILD_ID_SINSTS3) + ";" + teleinfo.SINSTS3 + ";";
-    data += String(CHILD_ID_LINKY) + ";8;";
+    trame =  String(ENTETE) + String(CLIENT_LINKY_ADDRESS) + ';' + String(GATEWAY_ADDRESS) + ';';
+    data += String(ETIQU_SINSTS1) + ';' + teleinfo.SINSTS1 + ";";
+    data += String(ETIQU_SINSTS2) + ';' + teleinfo.SINSTS2 + ";";
+    data += String(ETIQU_SINSTS3) + ';' + teleinfo.SINSTS3 + ";";
+    data += String(ETIQU_STEP) + ";T1;";
     trame += xxtea.encrypt(data);
+    
     Serial.print(F(">> Send tri: "));
     Serial.print(trame.length());
     Serial.print(F(": "));
@@ -419,7 +431,8 @@ void send_boot()
 {
   Serial.println(F(">> Send BOOT"));
   verif_charge_condo();
-  envoyer_trame(String(CHILD_ID_LINKY), "0");
+  envoyer_trame(String(ETIQU_BOOT), VERSION);
+  Serial.println(F(">> fin Send BOOT"));
 }
 
 //-------------------------------------------------------------------- charge_condo
@@ -436,13 +449,14 @@ boolean flag_cap = false;
   }
   led_chg.Off();
   digitalWrite(POWER_PIN, HIGH);
+  
 }
 
 //-------------------------------------------------------------------- test_charge_condo
 boolean test_charge_condo()
 {
 boolean rc = true;
- 
+
   if (analogRead(A0) < SEUIL_CHARGE) {
     rc=false;
   }
@@ -489,11 +503,13 @@ void setup()
     charge_condo();
   }
   LoRa.enableCrc();
+  LoRa.setTxPower(RFM_TX_POWER);
   LoRa.sleep();
   Serial.println(F("OK."));
 
   send_boot();
 
+  Serial.println("Fin setup");
 }
 
 
