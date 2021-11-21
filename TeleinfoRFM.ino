@@ -28,6 +28,8 @@
 //--------------------------------------------------------------------
 // 2021/01/15 - FB V1.0.0
 // 2021/06/11 - FB V1.0.1
+// 2021/07/01 - FB V1.0.2 - Add ETIQU_URMS1..3
+// 2021/11/21 - FB V1.0.3 - Bug fix  modes triphasé et producteur
 //--------------------------------------------------------------------
 #include <Arduino.h>
 #include <SPI.h>
@@ -36,7 +38,7 @@
 #define MAX_XXTEA_DATA8 200
 #include <xxtea-lib.h>
 
-#define VERSION   "v1.0.1"
+#define VERSION   "v1.0.3"
 
 #define GATEWAY_ADDRESS       1
 #define CLIENT_LINKY_ADDRESS  2
@@ -148,6 +150,7 @@ unsigned int step_envoi = 0;
 unsigned int step_info = 0;
 unsigned int step_mono = 0;
 unsigned int step_prod = 0;
+unsigned int step_tri = 0;
 
 boolean mode_producteur = false;
 boolean mode_triphase = false;
@@ -168,11 +171,15 @@ void change_etat_led_teleinfo()
 // ---------------------- ------------------------------------------ LoRa_sendMessage
 void LoRa_sendMessage(String message) {
 
+  digitalWrite(TRANS_LED_PIN, HIGH);
+  
   LoRa.idle();
   LoRa.beginPacket();    // start packet
   LoRa.print(message);   // add payload
   LoRa.endPacket();      // finish packet and send it
   LoRa.sleep();
+
+  digitalWrite(TRANS_LED_PIN, LOW);
 
 }
 
@@ -182,8 +189,6 @@ void envoyer_trame(String etiquette, String valeur)
 String trame;
 
   if (valeur.length() > 0) {
-    digitalWrite(TRANS_LED_PIN, HIGH);
-
     trame =  String(ENTETE) + String(CLIENT_LINKY_ADDRESS) + ';' + String(GATEWAY_ADDRESS) + ';' + xxtea.encrypt(etiquette + ";" + valeur + ";");
     
     Serial.print(F("Send char: "));
@@ -191,7 +196,7 @@ String trame;
     Serial.print(F(": "));
     Serial.println(trame);
     LoRa_sendMessage(trame);
-    digitalWrite(TRANS_LED_PIN, LOW);
+
   }
 }
 
@@ -201,7 +206,7 @@ boolean send_teleinfo_info()
 boolean rc = false;
 String trame, data;
 
-  digitalWrite(TRANS_LED_PIN, HIGH);
+  
   switch (step_info) {
 
     // deux vagues pour ne pas dépasser les 200 caractères max pour LORA
@@ -219,11 +224,8 @@ String trame, data;
         Serial.println(trame);
     
         LoRa_sendMessage(trame);
-    
-        digitalWrite(TRANS_LED_PIN, LOW);
         step_info++;
       }
-      else digitalWrite(TRANS_LED_PIN, HIGH);
       break;
       
     case 1 : // info deuxième vague
@@ -240,12 +242,9 @@ String trame, data;
         Serial.println(trame);
     
         LoRa_sendMessage(trame);
-    
-        digitalWrite(TRANS_LED_PIN, LOW);
         step_info=0;
         rc=true;
       }
-      else digitalWrite(TRANS_LED_PIN, HIGH);
       break;
   }
 
@@ -258,7 +257,6 @@ boolean send_teleinfo_monophase()
 boolean rc = false;
 String trame, data;
 
-  digitalWrite(TRANS_LED_PIN, HIGH);
   switch (step_mono) {
 
     // deux vagues pour ne pas dépasser les 200 caractères max pour LORA
@@ -268,6 +266,7 @@ String trame, data;
         data = String(ETIQU_SINSTS) + ';' + teleinfo.SINSTS + ";";
         data += String(ETIQU_SINSTSmin) + ';' + teleinfo.SINSTSmin + ";";
         data += String(ETIQU_SINSTSmax) + ';' + teleinfo.SINSTSmax + ";";
+		    data += String(ETIQU_URMS1) + ';' + teleinfo.URMS1 + ";";
         data += String(ETIQU_STEP) + ";M1;";
         teleinfo.SINSTSmin = teleinfo.SINSTS;
         teleinfo.SINSTSmax = teleinfo.SINSTS;
@@ -279,11 +278,8 @@ String trame, data;
         Serial.println(trame);
     
         LoRa_sendMessage(trame);
-    
-        digitalWrite(TRANS_LED_PIN, LOW);
         step_mono++;
       }
-      else digitalWrite(TRANS_LED_PIN, HIGH);
       break;
 
     case 1 : // mono deuxième vague
@@ -303,11 +299,8 @@ String trame, data;
         Serial.println(trame);
     
         LoRa_sendMessage(trame);
-    
-        digitalWrite(TRANS_LED_PIN, LOW);
         step_mono++;
       }
-      else digitalWrite(TRANS_LED_PIN, HIGH);
       break;
 
     case 2 : // mono troisième vague
@@ -325,12 +318,9 @@ String trame, data;
         Serial.println(trame);
     
         LoRa_sendMessage(trame);
-    
-        digitalWrite(TRANS_LED_PIN, LOW);
         step_mono=0;
         rc=true;
       }
-      else digitalWrite(TRANS_LED_PIN, HIGH);
       break;
 
   }
@@ -343,7 +333,6 @@ boolean send_teleinfo_producteur()
 boolean rc = false;
 String trame, data;
 
-  digitalWrite(TRANS_LED_PIN, HIGH);
   switch (step_mono) {
   // deux vagues pour ne pas dépasser les 200 caractères max pour LORA
     case 0 : // prod première vague
@@ -362,14 +351,11 @@ String trame, data;
         Serial.println(trame);
     
         LoRa_sendMessage(trame);
-    
-        digitalWrite(TRANS_LED_PIN, LOW);
         step_prod++;
       }
-      else digitalWrite(TRANS_LED_PIN, HIGH);
       break;
 
-    case 2 : // prod deuxime vague
+    case 1 : // prod deuxime vague
       if (test_charge_condo() == true) {
         trame =  String(ENTETE) + String(CLIENT_LINKY_ADDRESS) + ';' + String(GATEWAY_ADDRESS) + ';';
         data += String(ETIQU_ERQ2) + ';' + teleinfo.ERQ2 + ";";
@@ -384,12 +370,9 @@ String trame, data;
         Serial.println(trame);
     
         LoRa_sendMessage(trame);
-    
-        digitalWrite(TRANS_LED_PIN, LOW);
         step_prod=0;
         rc=true;
       }
-      else digitalWrite(TRANS_LED_PIN, HIGH);
       break;
   }
 
@@ -402,25 +385,46 @@ boolean send_teleinfo_triphase()
 boolean rc = false;
 String trame, data;
 
-  digitalWrite(TRANS_LED_PIN, HIGH);
-  if (test_charge_condo() == true) {
+  
+  switch (step_tri) {
+  // deux vagues pour ne pas dépasser les 200 caractères max pour LORA
+    case 0 : // tri première vague
+      if (test_charge_condo() == true) {
+        trame =  String(ENTETE) + String(CLIENT_LINKY_ADDRESS) + ';' + String(GATEWAY_ADDRESS) + ';';
+    		data += String(ETIQU_SINSTS1) + ';' + teleinfo.SINSTS1 + ";";
+    		data += String(ETIQU_SINSTS2) + ';' + teleinfo.SINSTS2 + ";";
+    		data += String(ETIQU_SINSTS3) + ';' + teleinfo.SINSTS3 + ";";
+    		data += String(ETIQU_STEP) + ";T1;";
+    		trame += xxtea.encrypt(data);
+        
+        Serial.print(F(">> Send tri 1 vague "));
+        Serial.print(trame.length());
+        Serial.print(F(": "));
+        Serial.println(trame);
     
-    trame =  String(ENTETE) + String(CLIENT_LINKY_ADDRESS) + ';' + String(GATEWAY_ADDRESS) + ';';
-    data += String(ETIQU_SINSTS1) + ';' + teleinfo.SINSTS1 + ";";
-    data += String(ETIQU_SINSTS2) + ';' + teleinfo.SINSTS2 + ";";
-    data += String(ETIQU_SINSTS3) + ';' + teleinfo.SINSTS3 + ";";
-    data += String(ETIQU_STEP) + ";T1;";
-    trame += xxtea.encrypt(data);
+        LoRa_sendMessage(trame);
+        step_tri++;
+      }
+      break;
+
+    case 1 : // tri deuxime vague
+      if (test_charge_condo() == true) {
+        trame =  String(ENTETE) + String(CLIENT_LINKY_ADDRESS) + ';' + String(GATEWAY_ADDRESS) + ';';
+        data += String(ETIQU_URMS2) + ';' + teleinfo.URMS2 + ";";
+        data += String(ETIQU_URMS3) + ';' + teleinfo.URMS3 + ";";
+        data += String(ETIQU_STEP) + ";T2;";
+        trame += xxtea.encrypt(data);
+        
+        Serial.print(F(">> Send tri 2 vague "));
+        Serial.print(trame.length());
+        Serial.print(F(": "));
+        Serial.println(trame);
     
-    Serial.print(F(">> Send tri: "));
-    Serial.print(trame.length());
-    Serial.print(F(": "));
-    Serial.println(trame);
-
-    LoRa_sendMessage(trame);
-
-    digitalWrite(TRANS_LED_PIN, LOW);
-    rc=true;
+        LoRa_sendMessage(trame);
+        step_tri=0;
+        rc=true;
+      }
+      break;
   }
 
   return rc;

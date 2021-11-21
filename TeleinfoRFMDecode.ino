@@ -84,7 +84,7 @@ char sum = 0;
 void traitement_trame(char *buff)
 {
 
-    //Serial.println(buff);
+    Serial.println(buff);
     
     if (strncmp("ADSC", &buff[0] , 4)==0) {
       strncpy(teleinfo._ADSC, &buff[5], 12);
@@ -268,7 +268,7 @@ char in;
   
   if (Serial.available()>0) {
     in = (char)Serial.read() & 127;  // seulement sur 7 bits
-
+    //Serial.print(in);
     switch (in) {
       case DEB_TRAME:
         index_buff=0;
