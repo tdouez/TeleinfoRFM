@@ -28,7 +28,7 @@
 // Pas d’Utilisation Commerciale.
 // Partage dans les Mêmes Conditions 4.0 International.
 //--------------------------------------------------------------------
-// Trame : $origine;libelle;donnees   (libellé & donnnées cryptés)
+// Trame : $origine;libelle;donnees   (libellé & donnnées)
 //--------------------------------------------------------------------
 // 2021/01/15 - FB V1.0.0
 // 2021/06/11 - FB V1.0.1
@@ -37,6 +37,7 @@
 // 2021/12/08 - FB V2.0.0 - Utilisation de la librairie libTeleinfo (https://github.com/hallard/LibTeleinfo) et chg protocole vers GW
 // 2021/12/27 - FB V2.0.1 - Fix bug aléatoire, blocage envoi data
 // 2021/01/07 - FB V2.0.2 - Optimisation utilisation mémoire et emissions datas. Ajout détection vitesse TIC.
+// 2021/01/11 - FB V2.0.3 - Suppression warning et modif gestion timeout vitesse TIC
 //--------------------------------------------------------------------
 
 #include <Arduino.h>
@@ -51,7 +52,7 @@ extern "C" char* sbrk(int incr);
 extern char *__brkval;
 #endif  // __arm__
 
-#define VERSION   "v2.0.2"
+#define VERSION   "v2.0.3"
 
 #define ENTETE  "$"
 
@@ -80,7 +81,7 @@ unsigned long lastTime_full = 0;
 unsigned long lastTime_tic = 0;
 //unsigned long lastTime_timeout_tic = 0;
 char adresse_compteur[13];
-unsigned int mode_tic;
+_Mode_e mode_tic;
 
 TInfo tinfo;
 
@@ -123,7 +124,7 @@ void change_etat_led_teleinfo()
 // ---------------------------------------------------------------- 
 // change_etat_led_teleinfo
 // ---------------------------------------------------------------- 
-void clignote_led(uint8_t led, uint8_t nbr, uint8_t delais)
+void clignote_led(uint8_t led, uint8_t nbr, int16_t delais)
 {
 int led_state;
 
@@ -138,7 +139,7 @@ int led_state;
 // ---------------------------------------------------------------- 
 // init_speed_TIC
 // ---------------------------------------------------------------- 
-unsigned int init_speed_TIC()
+_Mode_e init_speed_TIC()
 {
 boolean flag_timeout = false;
 boolean flag_found_speed = false;
@@ -146,7 +147,7 @@ boolean flag_debut_trame = false;
 boolean flag_milieu_trame = false;
 boolean flag_fin_trame = false;
 uint32_t currentTime = millis();
-unsigned int mode;
+_Mode_e mode;
 
   digitalWrite(TELEINFO_LED_PIN, HIGH);
   digitalWrite(CHARGE_LED_PIN, HIGH);
@@ -162,8 +163,8 @@ unsigned int mode;
       if (in == 0x0D) flag_fin_trame = true; // fin trame
 
       if (flag_debut_trame && flag_milieu_trame && flag_fin_trame) flag_found_speed = true;
-      if (currentTime + 10000 <  millis()) flag_timeout = true; // 10s de timeout
     }
+    if (currentTime + 10000 <  millis()) flag_timeout = true; // 10s de timeout
   }
 
   if (flag_timeout) { // trame avec vistesse histo non trouvée donc passage en mode standard
