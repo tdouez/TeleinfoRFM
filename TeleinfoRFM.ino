@@ -36,8 +36,9 @@
 // 2021/11/21 - FB V1.0.3 - Bug fix  modes triphasé et producteur
 // 2021/12/08 - FB V2.0.0 - Utilisation de la librairie libTeleinfo (https://github.com/hallard/LibTeleinfo) et chg protocole vers GW
 // 2021/12/27 - FB V2.0.1 - Fix bug aléatoire, blocage envoi data
-// 2021/01/07 - FB V2.0.2 - Optimisation utilisation mémoire et emissions datas. Ajout détection vitesse TIC.
-// 2021/01/11 - FB V2.0.3 - Suppression warning et modif gestion timeout vitesse TIC
+// 2022/01/07 - FB V2.0.2 - Optimisation utilisation mémoire et emissions datas. Ajout détection vitesse TIC.
+// 2022/01/11 - FB V2.0.3 - Suppression warning et modif gestion timeout vitesse TIC
+// 2022/01/23 - FB V2.0.4 - Correction sur détection TIC historique
 //--------------------------------------------------------------------
 
 #include <Arduino.h>
@@ -52,7 +53,7 @@ extern "C" char* sbrk(int incr);
 extern char *__brkval;
 #endif  // __arm__
 
-#define VERSION   "v2.0.3"
+#define VERSION   "v2.0.4"
 
 #define ENTETE  "$"
 
@@ -159,7 +160,7 @@ _Mode_e mode;
     if (Serial.available()>0) {
       char in = (char)Serial.read() & 127;  // seulement sur 7 bits
       if (in == 0x0A) flag_debut_trame = true; // début trame
-      if (in == 0x09) flag_milieu_trame = true; // milieu trame
+      if (in == 0x20) flag_milieu_trame = true; // milieu trame
       if (in == 0x0D) flag_fin_trame = true; // fin trame
 
       if (flag_debut_trame && flag_milieu_trame && flag_fin_trame) flag_found_speed = true;
@@ -298,20 +299,19 @@ void send_teleinfo(ValueList *vl_tic, boolean all_tic)
       if ( all_tic || ( vl_tic->flags & (TINFO_FLAGS_UPDATED | TINFO_FLAGS_ADDED) )) {
         digitalWrite(TELEINFO_LED_PIN, HIGH);
         if (vl_tic->name && strlen(vl_tic->name) > 2 && vl_tic->value && strlen(vl_tic->value) > 1) {
-		  
-		  verif_charge_condo(SEUIL_CHARGE_98);
-		  LoRa.idle();
-		  LoRa.beginPacket();    // start packet
-		  LoRa.print(ENTETE);  
-		  LoRa.print(F("Linky_")); 
-		  LoRa.print(adresse_compteur); 
-		  LoRa.print(F(";"));
-		  LoRa.print(vl_tic->name); 
-		  LoRa.print(F(";"));
-		  LoRa.print(vl_tic->value); 
-		  LoRa.print(F(";"));
-		  LoRa.endPacket();      // finish packet and send it
-		  LoRa.sleep();
+    		  verif_charge_condo(SEUIL_CHARGE_98);
+    		  LoRa.idle();
+    		  LoRa.beginPacket();    // start packet
+    		  LoRa.print(ENTETE);  
+    		  LoRa.print(F("Linky_")); 
+    		  LoRa.print(adresse_compteur); 
+    		  LoRa.print(F(";"));
+    		  LoRa.print(vl_tic->name); 
+    		  LoRa.print(F(";"));
+    		  LoRa.print(vl_tic->value); 
+    		  LoRa.print(F(";"));
+    		  LoRa.endPacket();      // finish packet and send it
+    		  LoRa.sleep();
         }
         digitalWrite(TELEINFO_LED_PIN, LOW);
       }
