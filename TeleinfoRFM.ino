@@ -39,6 +39,7 @@
 // 2022/01/07 - FB V2.0.2 - Optimisation utilisation mémoire et emissions datas. Ajout détection vitesse TIC.
 // 2022/01/11 - FB V2.0.3 - Suppression warning et modif gestion timeout vitesse TIC
 // 2022/01/23 - FB V2.0.4 - Correction sur détection TIC historique
+// 2022/06/25 - FB V2.0.5 - Optimisation mémoire
 //--------------------------------------------------------------------
 
 #include <Arduino.h>
@@ -76,8 +77,10 @@ boolean flag_send_tic = true;
 boolean flag_adresse_tic;
 boolean flag_boot;
 
-unsigned long SEND_FREQUENCY_FULL = 300000; // 5mn, Minimum time between send (in milliseconds). 
-unsigned long SEND_FREQUENCY_TIC  =  15000; // 15s,  Minimum time between send (in milliseconds). 
+const char char_ADCO[] PROGMEM = "ADCO";
+const char char_ADSC[] PROGMEM = "ADSC";
+const unsigned long SEND_FREQUENCY_FULL = 180000; // 3mn, Minimum time between send (in milliseconds). 
+const unsigned long SEND_FREQUENCY_TIC  =  15000; // 15s,  Minimum time between send (in milliseconds). 
 unsigned long lastTime_full = 0;
 unsigned long lastTime_tic = 0;
 //unsigned long lastTime_timeout_tic = 0;
@@ -86,7 +89,7 @@ _Mode_e mode_tic;
 
 TInfo tinfo;
 
-
+/*
 // ---------------------------------------------------------------- 
 // freeMemory
 // ---------------------------------------------------------------- 
@@ -108,7 +111,7 @@ void affiche_freeMemory() {
 	Serial.print(F("SRAM:"));
 	Serial.println(freeMemory());
 }
-
+*/
 
 // ---------------------------------------------------------------- 
 // change_etat_led_teleinfo
@@ -192,8 +195,6 @@ _Mode_e mode;
 // ---------------------------------------------------------------- 
 void send_boot() 
 {
- 
-  //Serial.println(F(">> Send BOOT"));
 
   verif_charge_condo(SEUIL_CHARGE_FULL);
   
@@ -207,8 +208,7 @@ void send_boot()
   LoRa.print(F(";"));
   LoRa.endPacket();      // finish packet and send it
   LoRa.sleep();
-  
-  //Serial.println(F(">> fin Send BOOT"));
+
 }
 
 // ---------------------------------------------------------------- 
@@ -225,7 +225,7 @@ void search_adress_teleinfo(ValueList *vl_tic)
 
       if (vl_tic->name && strlen(vl_tic->name) && vl_tic->value && strlen(vl_tic->value)) {
         change_etat_led_teleinfo();
-        if (strstr(vl_tic->name, "ADCO") || strstr(vl_tic->name, "ADSC")) {
+        if (strstr_P(vl_tic->name, char_ADCO) == 0 || strstr_P(vl_tic->name, char_ADSC) == 0) {
           strncpy(adresse_compteur, vl_tic->value, 12);
           Serial.print(F("Adresse compteur: "));
           Serial.println(adresse_compteur);
@@ -329,7 +329,7 @@ Comments: -
 ====================================================================== */
 void NewFrame(ValueList *vl_tic)
 {
-  affiche_freeMemory();
+  //affiche_freeMemory();
   
   if (!flag_adresse_tic) search_adress_teleinfo(vl_tic);
     else send_teleinfo(vl_tic, full_tic);
@@ -348,7 +348,7 @@ Comments: it's called only if one data in the frame is different than
 ====================================================================== */
 void UpdatedFrame(ValueList *vl_tic)
 {
-  affiche_freeMemory();
+  //affiche_freeMemory();
   
   if (!flag_adresse_tic) search_adress_teleinfo(vl_tic);
     else send_teleinfo(vl_tic, full_tic);
@@ -406,7 +406,7 @@ void DataCallback(ValueList * me, uint8_t  flags)
 
     }
     else { // recherche adresse compteur
-      if (strstr(me->name, "ADCO") || strstr(me->name, "ADSC")) {
+      if (strstr_P(me->name, char_ADCO) == 0 || strstr_P(me->name, char_ADSC) == 0) {
         strncpy(adresse_compteur, me->value, 12);
         Serial.print(F("Adresse compteur: "));
         Serial.println(adresse_compteur);
@@ -464,7 +464,7 @@ void setup()
   tinfo.attachNewFrame(NewFrame);
   tinfo.attachUpdatedFrame(UpdatedFrame);
 
-  affiche_freeMemory();
+  //affiche_freeMemory();
 }
 
 
