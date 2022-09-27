@@ -40,6 +40,7 @@
 // 2022/01/11 - FB V2.0.3 - Suppression warning et modif gestion timeout vitesse TIC
 // 2022/01/23 - FB V2.0.4 - Correction sur détection TIC historique
 // 2022/06/25 - FB V2.0.5 - Optimisation mémoire
+// 2022/09/25 - FB V2.0.6 - Correction sur détection TIC standard
 //--------------------------------------------------------------------
 
 #include <Arduino.h>
@@ -54,7 +55,7 @@ extern "C" char* sbrk(int incr);
 extern char *__brkval;
 #endif  // __arm__
 
-#define VERSION   "v2.0.4"
+#define VERSION   "v2.0.6"
 
 #define ENTETE  "$"
 
@@ -147,10 +148,8 @@ _Mode_e init_speed_TIC()
 {
 boolean flag_timeout = false;
 boolean flag_found_speed = false;
-boolean flag_debut_trame = false;
-boolean flag_milieu_trame = false;
-boolean flag_fin_trame = false;
 uint32_t currentTime = millis();
+unsigned step = 0;
 _Mode_e mode;
 
   digitalWrite(TELEINFO_LED_PIN, HIGH);
@@ -162,11 +161,23 @@ _Mode_e mode;
   while (!flag_timeout && !flag_found_speed) {
     if (Serial.available()>0) {
       char in = (char)Serial.read() & 127;  // seulement sur 7 bits
-      if (in == 0x0A) flag_debut_trame = true; // début trame
-      if (in == 0x20) flag_milieu_trame = true; // milieu trame
-      if (in == 0x0D) flag_fin_trame = true; // fin trame
-
-      if (flag_debut_trame && flag_milieu_trame && flag_fin_trame) flag_found_speed = true;
+      // début trame
+      if (in == 0x0A) {
+        step = 1;
+      }
+      // premier milieu de trame
+        if (step == 1 && in == 0x20) {
+        step = 2;
+      }
+      // deuxième milieu de trame
+        if (step == 2 && in == 0x20) {
+        step = 3;
+      }
+      // fin trame
+        if (step == 3 && in == 0x0D) {
+        flag_found_speed = true;
+        step = 0;
+      }
     }
     if (currentTime + 10000 <  millis()) flag_timeout = true; // 10s de timeout
   }
