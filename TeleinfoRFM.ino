@@ -41,6 +41,7 @@
 // 2022/01/23 - FB V2.0.4 - Correction sur détection TIC historique
 // 2022/06/25 - FB V2.0.5 - Optimisation mémoire
 // 2022/09/25 - FB V2.0.6 - Correction sur détection TIC standard
+// 2023/03/23 = FB V2.0.7 - Ajout indication réception TIC et optimisation mémoire
 //--------------------------------------------------------------------
 
 #include <Arduino.h>
@@ -55,7 +56,7 @@ extern "C" char* sbrk(int incr);
 extern char *__brkval;
 #endif  // __arm__
 
-#define VERSION   "v2.0.6"
+#define VERSION   "v2.0.7"
 
 #define ENTETE  "$"
 
@@ -84,7 +85,6 @@ const unsigned long SEND_FREQUENCY_FULL = 180000; // 3mn, Minimum time between s
 const unsigned long SEND_FREQUENCY_TIC  =  15000; // 15s,  Minimum time between send (in milliseconds). 
 unsigned long lastTime_full = 0;
 unsigned long lastTime_tic = 0;
-//unsigned long lastTime_timeout_tic = 0;
 char adresse_compteur[13];
 _Mode_e mode_tic;
 
@@ -133,7 +133,7 @@ void clignote_led(uint8_t led, uint8_t nbr, int16_t delais)
 {
 int led_state;
 
-  for (int i=0; i<nbr*2; i++) {
+  for (uint8_t i=0; i<nbr*2; i++) {
     led_state = !led_state;
     digitalWrite(led, led_state);
     delay(delais);
@@ -149,7 +149,7 @@ _Mode_e init_speed_TIC()
 boolean flag_timeout = false;
 boolean flag_found_speed = false;
 uint32_t currentTime = millis();
-unsigned step = 0;
+uint8_t step = 0;
 _Mode_e mode;
 
   digitalWrite(TELEINFO_LED_PIN, HIGH);
@@ -192,7 +192,7 @@ _Mode_e mode;
   else {
     mode = TINFO_MODE_HISTORIQUE;
     Serial.println(F("TIC mode historique"));
-    clignote_led(CHARGE_LED_PIN, 5, 500);
+    clignote_led(CHARGE_LED_PIN, 5, 400);
   }
   
   digitalWrite(TELEINFO_LED_PIN, LOW);
@@ -233,12 +233,10 @@ void search_adress_teleinfo(ValueList *vl_tic)
     // parcours liste chainée vl_tic
     while (vl_tic->next) {
       vl_tic = vl_tic->next;
-
       if (vl_tic->name && strlen(vl_tic->name) && vl_tic->value && strlen(vl_tic->value)) {
-        change_etat_led_teleinfo();
         if (strstr_P(vl_tic->name, char_ADCO) == 0 || strstr_P(vl_tic->name, char_ADSC) == 0) {
           strncpy(adresse_compteur, vl_tic->value, 12);
-          Serial.print(F("Adresse compteur: "));
+          Serial.print(F("Adr cpt: "));
           Serial.println(adresse_compteur);
           flag_adresse_tic = true;
           break;
@@ -259,6 +257,7 @@ boolean flag_cap = false;
 
   Serial.print(F(">> Charge Condo.."));
   digitalWrite(CHARGE_LED_PIN, HIGH);
+  digitalWrite(TELEINFO_LED_PIN, LOW);
 
   while (flag_cap == false) {
     if (analogRead(A0) >= ref_seuil) flag_cap = true;
@@ -274,14 +273,9 @@ boolean flag_cap = false;
 // ---------------------------------------------------------------- 
 boolean test_charge_condo(int ref_seuil)
 {
-boolean rc = true;
-int seuil;
+  if (analogRead(A0) < ref_seuil) return false;
 
-  seuil = analogRead(A0);
-  if (seuil < ref_seuil) {
-    rc=false;
-  }
-  return rc;
+  return true;
 }
 
 // ---------------------------------------------------------------- 
@@ -379,52 +373,7 @@ void DataCallback(ValueList * me, uint8_t  flags)
 {
 
   change_etat_led_teleinfo();
-  
-  if (me->name && strlen(me->name) > 2 && me->value && strlen(me->value) > 1) {
     
-    // données ---------------
-    /*
-    Serial.print(F(">>>"));
-    Serial.print(me->name);
-    Serial.print(F(":"));
-    Serial.print(me->value);
-    Serial.print(F(":"));
-    if (flags & TINFO_FLAGS_ADDED) Serial.println(F("NEW"));
-    if (flags & TINFO_FLAGS_UPDATED) Serial.println(F("MAJ"));
-    */
-        
-    if (flag_adresse_tic) { // adresse compteur connu
-      
-      if (flag_boot) {
-        // envoi version au démarrage
-        send_boot();
-        flag_boot = false;
-      }
-
-      verif_charge_condo(SEUIL_CHARGE_98);
-      LoRa.idle();
-      LoRa.beginPacket();    // start packet
-      LoRa.print(ENTETE);  
-      LoRa.print(F("Linky_")); 
-      LoRa.print(adresse_compteur); 
-      LoRa.print(F(";"));
-      LoRa.print(me->name); 
-      LoRa.print(F(";"));
-      LoRa.print(me->value); 
-      LoRa.print(F(";"));
-      LoRa.endPacket();      // finish packet and send it
-      LoRa.sleep();
-
-    }
-    else { // recherche adresse compteur
-      if (strstr_P(me->name, char_ADCO) == 0 || strstr_P(me->name, char_ADSC) == 0) {
-        strncpy(adresse_compteur, me->value, 12);
-        Serial.print(F("Adresse compteur: "));
-        Serial.println(adresse_compteur);
-        flag_adresse_tic = true;
-       }
-    }
-  }  
 }
 
 
@@ -471,7 +420,7 @@ void setup()
   
   // init interface TIC
   tinfo.init(mode_tic);
-  //tinfo.attachData(DataCallback);
+  tinfo.attachData(DataCallback);
   tinfo.attachNewFrame(NewFrame);
   tinfo.attachUpdatedFrame(UpdatedFrame);
 
@@ -498,7 +447,7 @@ uint32_t currentTime = millis();
     
     // envoyer l'ensemble des données tous les SEND_FREQUENCY_FULL ms
     if (currentTime - lastTime_full > SEND_FREQUENCY_FULL) {
-      Serial.println(F("SEND_FREQUENCY_FULL"));
+      //Serial.println(F("SEND_FREQUENCY_FULL"));
       full_tic = true;
       flag_tic = true;
       lastTime_full = currentTime;
@@ -506,7 +455,7 @@ uint32_t currentTime = millis();
   
     // envoyer les données tous les SEND_FREQUENCY_TIC ms
     if (currentTime - lastTime_tic > SEND_FREQUENCY_TIC) {
-      Serial.println(F("SEND_FREQUENCY_TIC"));
+      //Serial.println(F("SEND_FREQUENCY_TIC"));
       flag_tic = true;
       lastTime_tic = currentTime;
     }
