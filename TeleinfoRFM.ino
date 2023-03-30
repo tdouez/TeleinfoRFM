@@ -1,4 +1,4 @@
-  //--------------------------------------------------------------------
+//--------------------------------------------------------------------
 //                 +/
 //                 `hh-
 //        ::        /mm:
@@ -41,7 +41,8 @@
 // 2022/01/23 - FB V2.0.4 - Correction sur détection TIC historique
 // 2022/06/25 - FB V2.0.5 - Optimisation mémoire
 // 2022/09/25 - FB V2.0.6 - Correction sur détection TIC standard
-// 2023/03/23 = FB V2.0.7 - Ajout indication réception TIC et optimisation mémoire
+// 2023/03/23 - FB V2.0.7 - Ajout indication réception TIC et optimisation mémoire
+// 2023/03/30 - FB V2.0.8 - Correction blocage aléatoire module, frequence maj 15 à 20s, clignotement durant charge condo
 //--------------------------------------------------------------------
 
 #include <Arduino.h>
@@ -56,7 +57,7 @@ extern "C" char* sbrk(int incr);
 extern char *__brkval;
 #endif  // __arm__
 
-#define VERSION   "v2.0.7"
+#define VERSION   "v2.0.8"
 
 #define ENTETE  "$"
 
@@ -82,7 +83,7 @@ boolean flag_boot;
 const char char_ADCO[] PROGMEM = "ADCO";
 const char char_ADSC[] PROGMEM = "ADSC";
 const unsigned long SEND_FREQUENCY_FULL = 180000; // 3mn, Minimum time between send (in milliseconds). 
-const unsigned long SEND_FREQUENCY_TIC  =  15000; // 15s,  Minimum time between send (in milliseconds). 
+const unsigned long SEND_FREQUENCY_TIC  =  20000; // 15s,  Minimum time between send (in milliseconds). 
 unsigned long lastTime_full = 0;
 unsigned long lastTime_tic = 0;
 char adresse_compteur[13];
@@ -115,23 +116,23 @@ void affiche_freeMemory() {
 */
 
 // ---------------------------------------------------------------- 
-// change_etat_led_teleinfo
+// change_etat_led
 // ---------------------------------------------------------------- 
-void change_etat_led_teleinfo()
+void change_etat_led(uint8_t led)
 {
-  static int led_state;
+  static uint8_t led_state;
 
   led_state = !led_state;
-  digitalWrite(TELEINFO_LED_PIN, led_state);
+  digitalWrite(led, led_state);
 
 }
 
 // ---------------------------------------------------------------- 
-// change_etat_led_teleinfo
+// clignote_led
 // ---------------------------------------------------------------- 
 void clignote_led(uint8_t led, uint8_t nbr, int16_t delais)
 {
-int led_state;
+uint8_t led_state;
 
   for (uint8_t i=0; i<nbr*2; i++) {
     led_state = !led_state;
@@ -208,8 +209,7 @@ void send_boot()
 {
 
   verif_charge_condo(SEUIL_CHARGE_FULL);
-  
-  LoRa.idle();
+  start_rf95();
   LoRa.beginPacket();    // start packet
   LoRa.print(ENTETE);  
   LoRa.print(F("Linky_")); 
@@ -218,8 +218,8 @@ void send_boot()
   LoRa.print(VERSION); 
   LoRa.print(F(";"));
   LoRa.endPacket();      // finish packet and send it
-  LoRa.sleep();
-
+  delay(20);
+  stop_rf95();
 }
 
 // ---------------------------------------------------------------- 
@@ -260,7 +260,11 @@ boolean flag_cap = false;
   digitalWrite(TELEINFO_LED_PIN, LOW);
 
   while (flag_cap == false) {
-    if (analogRead(A0) >= ref_seuil) flag_cap = true;
+	if (analogRead(A0) >= ref_seuil) flag_cap = true;
+	else {
+		change_etat_led(CHARGE_LED_PIN);
+		delay(300);
+	}
   }
   digitalWrite(CHARGE_LED_PIN, LOW);
   Serial.println(F(". done"));
@@ -302,10 +306,14 @@ void send_teleinfo(ValueList *vl_tic, boolean all_tic)
       vl_tic = vl_tic->next;
       // uniquement sur les nouvelles valeurs ou celles modifiées ou toutes
       if ( all_tic || ( vl_tic->flags & (TINFO_FLAGS_UPDATED | TINFO_FLAGS_ADDED) )) {
-        digitalWrite(TELEINFO_LED_PIN, HIGH);
         if (vl_tic->name && strlen(vl_tic->name) > 2 && vl_tic->value && strlen(vl_tic->value) > 1) {
+          Serial.print(F("Send "));
+          Serial.print(vl_tic->name);
+          Serial.print(F(":"));
+          Serial.println(vl_tic->value);
+
     		  verif_charge_condo(SEUIL_CHARGE_98);
-    		  LoRa.idle();
+			    start_rf95();
     		  LoRa.beginPacket();    // start packet
     		  LoRa.print(ENTETE);  
     		  LoRa.print(F("Linky_")); 
@@ -316,9 +324,9 @@ void send_teleinfo(ValueList *vl_tic, boolean all_tic)
     		  LoRa.print(vl_tic->value); 
     		  LoRa.print(F(";"));
     		  LoRa.endPacket();      // finish packet and send it
-    		  LoRa.sleep();
+			    delay(20);
+			    stop_rf95();
         }
-        digitalWrite(TELEINFO_LED_PIN, LOW);
       }
     }
     flag_tic = false;
@@ -372,10 +380,39 @@ Comments: -
 void DataCallback(ValueList * me, uint8_t  flags)
 {
 
-  change_etat_led_teleinfo();
+  change_etat_led(TELEINFO_LED_PIN);
     
 }
 
+// ---------------------------------------------------------------- 
+// start_rf95
+// ---------------------------------------------------------------- 
+boolean start_rf95()
+{
+boolean rc = false;
+
+  // activation alim et init RFM
+  digitalWrite(POWER_PIN, HIGH);
+  if (LoRa.begin(868E6)) {
+	LoRa.enableCrc();
+	LoRa.setTxPower(RFM_TX_POWER);
+	rc = true;
+  }
+  else {
+	rc = false;
+	Serial.println(F("Starting LoRa failed!"));
+  }
+  
+  return rc;
+}
+
+// ---------------------------------------------------------------- 
+// stop_rf95
+// ---------------------------------------------------------------- 
+void stop_rf95()
+{
+	digitalWrite(POWER_PIN, LOW);
+}
 
 // ---------------------------------------------------------------- 
 // setup
@@ -403,18 +440,6 @@ void setup()
   // première charge super condo
   verif_charge_condo(SEUIL_CHARGE_FULL);
 
-  // activation alim et init RFM
-  digitalWrite(POWER_PIN, HIGH);
-  Serial.print(F("Init RF95: "));
-  while (!LoRa.begin(868E6)) {
-    Serial.println(F("Starting LoRa failed!"));
-    charge_condo(SEUIL_CHARGE_FULL);
-  }
-  LoRa.enableCrc();
-  LoRa.setTxPower(RFM_TX_POWER);
-  LoRa.sleep();
-  Serial.println(F("OK."));
-
   flag_boot = true;
   flag_adresse_tic = false;
   
@@ -424,7 +449,6 @@ void setup()
   tinfo.attachNewFrame(NewFrame);
   tinfo.attachUpdatedFrame(UpdatedFrame);
 
-  //affiche_freeMemory();
 }
 
 
