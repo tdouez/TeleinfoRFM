@@ -43,12 +43,15 @@
 // 2022/09/25 - FB V2.0.6 - Correction sur détection TIC standard
 // 2023/03/23 - FB V2.0.7 - Ajout indication réception TIC et optimisation mémoire
 // 2023/03/30 - FB V2.0.8 - Correction blocage aléatoire module, frequence maj 15 à 20s, clignotement durant charge condo
+// 2023/05/04 - FB V2.0.9 - Amélioration détection mode TIC historique/standard
 //--------------------------------------------------------------------
 
 #include <Arduino.h>
 #include <SPI.h>
 #include <LoRa.h>
 #include <LibTeleinfo.h>
+
+//#define DEBUG_TIC
 
 #ifdef __arm__
 // should use uinstd.h to define sbrk but Due causes a conflict
@@ -57,7 +60,7 @@ extern "C" char* sbrk(int incr);
 extern char *__brkval;
 #endif  // __arm__
 
-#define VERSION   "v2.0.8"
+#define VERSION   "v2.0.9"
 
 #define ENTETE  "$"
 
@@ -132,7 +135,7 @@ void change_etat_led(uint8_t led)
 // ---------------------------------------------------------------- 
 void clignote_led(uint8_t led, uint8_t nbr, int16_t delais)
 {
-uint8_t led_state;
+uint8_t led_state=0;
 
   for (uint8_t i=0; i<nbr*2; i++) {
     led_state = !led_state;
@@ -151,6 +154,8 @@ boolean flag_timeout = false;
 boolean flag_found_speed = false;
 uint32_t currentTime = millis();
 uint8_t step = 0;
+int nbc_etiq=0;
+int nbc_val=0;
 _Mode_e mode;
 
   digitalWrite(TELEINFO_LED_PIN, HIGH);
@@ -163,19 +168,37 @@ _Mode_e mode;
     if (Serial.available()>0) {
       char in = (char)Serial.read() & 127;  // seulement sur 7 bits
       // début trame
-      if (in == 0x0A) {
-        step = 1;
+      if (step == 1) {
+        if (in == 0x20) {
+          #ifdef DEBUG_TIC
+            Serial.print(F("Etq 0x20:"));
+            Serial.println(nbc_etiq);
+          #endif
+          if (nbc_etiq > 3 && nbc_etiq < 10) step = 2;
+            else step = 0;
+        }
+        else nbc_etiq++; // recupère nombre caractères de l'étiquette
       }
-      // premier milieu de trame
-        if (step == 1 && in == 0x20) {
-        step = 2;
+      else {
+        // deuxième milieu de trame, valeur
+        if (step == 2) {
+          if (in == 0x20) {
+            #ifdef DEBUG_TIC
+              Serial.print(F("Val 0x20:"));
+              Serial.println(nbc_val);
+            #endif
+            if (nbc_val > 0 && nbc_val < 13) step = 3;
+              else step = 0;
+          }
+          else nbc_val++; // recupère nombre caractères de la valeur
+        }
       }
-      // deuxième milieu de trame
-        if (step == 2 && in == 0x20) {
-        step = 3;
-      }
+
       // fin trame
-        if (step == 3 && in == 0x0D) {
+      if (step == 3 && in == 0x0D) {
+        #ifdef DEBUG_TIC
+          Serial.println(F("Fin 0x0D"));
+        #endif
         flag_found_speed = true;
         step = 0;
       }
