@@ -44,6 +44,7 @@
 // 2023/03/23 - FB V2.0.7 - Ajout indication réception TIC et optimisation mémoire
 // 2023/03/30 - FB V2.0.8 - Correction blocage aléatoire module, frequence maj 15 à 20s, clignotement durant charge condo
 // 2023/05/04 - FB V2.0.9 - Amélioration détection mode TIC historique/standard
+// 2023/06/03 - FB V2.0.10 - Correction detection TIC historique
 //--------------------------------------------------------------------
 
 #include <Arduino.h>
@@ -60,7 +61,7 @@ extern "C" char* sbrk(int incr);
 extern char *__brkval;
 #endif  // __arm__
 
-#define VERSION   "v2.0.9"
+#define VERSION   "v2.0.10"
 
 #define ENTETE  "$"
 
@@ -164,9 +165,26 @@ _Mode_e mode;
   // Test en mode historique
   // Recherche des éléments de début, milieu et fin de trame 
   Serial.begin(1200); // mode historique
+  Serial.println(F("Recherche mod TIC"));
+
   while (!flag_timeout && !flag_found_speed) {
     if (Serial.available()>0) {
       char in = (char)Serial.read() & 127;  // seulement sur 7 bits
+
+      #ifdef DEBUG_TIC
+      Serial.print(in, HEX);
+      Serial.println(".");
+      #endif
+      // début trame
+      if (in == 0x0A) {
+        step = 1;
+        nbc_etiq = -1;
+        nbc_val = 0;
+        #ifdef DEBUG_TIC
+          Serial.println(F("Deb 0x0A"));
+        #endif
+      }
+
       // début trame
       if (step == 1) {
         if (in == 0x20) {
@@ -210,13 +228,13 @@ _Mode_e mode;
      mode = TINFO_MODE_STANDARD;
      Serial.end();
      Serial.begin(9600); // mode standard
-     Serial.println(F("TIC mode standard"));
+     Serial.println(F(">> TIC mode standard <<"));
      clignote_led(CHARGE_LED_PIN, 3, 500);
   }
   else {
     mode = TINFO_MODE_HISTORIQUE;
-    Serial.println(F("TIC mode historique"));
-    clignote_led(CHARGE_LED_PIN, 5, 400);
+    Serial.println(F(">> TIC mode historique <<"));
+    clignote_led(CHARGE_LED_PIN, 5, 200);
   }
   
   digitalWrite(TELEINFO_LED_PIN, LOW);
