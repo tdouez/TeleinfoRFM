@@ -45,6 +45,7 @@
 // 2023/03/30 - FB V2.0.8 - Correction blocage aléatoire module, frequence maj 15 à 20s, clignotement durant charge condo
 // 2023/05/04 - FB V2.0.9 - Amélioration détection mode TIC historique/standard
 // 2023/06/03 - FB V2.0.10 - Correction detection TIC historique
+// 2025/01/03 - FB V2.0.11 - Ajout compatibilité avec le Arduino Pro Micro
 //--------------------------------------------------------------------
 
 #include <Arduino.h>
@@ -61,7 +62,7 @@ extern "C" char* sbrk(int incr);
 extern char *__brkval;
 #endif  // __arm__
 
-#define VERSION   "v2.0.10"
+#define VERSION   "v2.0.11"
 
 #define ENTETE  "$"
 
@@ -73,8 +74,8 @@ extern char *__brkval;
 // Seuil : 4,5v à l'entrée du régulateur 3,3v > 4,5v*100k/(100k+68k)=2,68v sur A0
 //                                                 3,3v->1023 => 2,68->830
 //-------------------------------------------------------------------------------------
-#define SEUIL_CHARGE_FULL   820
-#define SEUIL_CHARGE_98     810
+#define SEUIL_CHARGE_FULL   815
+#define SEUIL_CHARGE_98     805
 
 #define RFM_TX_POWER   10   // 5..23 dB
 
@@ -164,12 +165,22 @@ _Mode_e mode;
   
   // Test en mode historique
   // Recherche des éléments de début, milieu et fin de trame 
+  #if defined(__AVR_ATmega32U4__)
+  Serial.begin(9600);
+  Serial1.begin(1200); // mode historique
+  #else
   Serial.begin(1200); // mode historique
+  #endif
   Serial.println(F("Recherche mod TIC"));
 
   while (!flag_timeout && !flag_found_speed) {
+    #if defined(__AVR_ATmega32U4__)
+    if (Serial1.available()>0) {
+      char in = (char)Serial1.read() & 127;  // seulement sur 7 bits
+    #else
     if (Serial.available()>0) {
       char in = (char)Serial.read() & 127;  // seulement sur 7 bits
+    #endif
 
       #ifdef DEBUG_TIC
       Serial.print(in, HEX);
@@ -226,8 +237,13 @@ _Mode_e mode;
 
   if (flag_timeout) { // trame avec vistesse histo non trouvée donc passage en mode standard
      mode = TINFO_MODE_STANDARD;
+     #if defined(__AVR_ATmega32U4__)
+     Serial1.end();
+     Serial1.begin(9600); // mode standard
+     #else
      Serial.end();
      Serial.begin(9600); // mode standard
+     #endif
      Serial.println(F(">> TIC mode standard <<"));
      clignote_led(CHARGE_LED_PIN, 3, 500);
   }
@@ -468,6 +484,8 @@ void setup()
   digitalWrite(TELEINFO_LED_PIN, LOW);
   digitalWrite(CHARGE_LED_PIN, LOW);
 
+  delay(2000);
+
   // init interface série suivant mode TIC
   mode_tic = init_speed_TIC();
   //Serial.begin(MODE_TIC == TINFO_MODE_HISTORIQUE ? 1200 : 9600);
@@ -500,7 +518,11 @@ void loop()
 {
 uint32_t currentTime = millis();
 
+  #if defined(__AVR_ATmega32U4__)
+  if (Serial1.available()) tinfo.process(Serial1.read());
+  #else
   if (Serial.available()) tinfo.process(Serial.read());
+  #endif
   
   if (flag_adresse_tic) {
 	  
